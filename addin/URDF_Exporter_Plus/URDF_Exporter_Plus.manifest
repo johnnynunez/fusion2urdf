@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "Johnny Nunez",
+    "description": {
+        "": "Export the active design to URDF / ROS 2 package / OpenUSD bundle"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fusion2urdf"
+version = "0.1.0"
+description = "Modern Fusion 360 to URDF / ROS 2 / OpenUSD (Isaac Sim) exporter"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Johnny Nunez" }]
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Robotics",
+]
+# Core is stdlib-only so it can also run inside Fusion 360's embedded Python.
+dependencies = []
+
+[project.optional-dependencies]
+usd = ["urdf-usd-converter>=0.2.0", "mujoco-usd-converter>=0.3.0"]
+dev = [
+    "pytest>=8",
+    "xacro>=2.0",
+    "yourdfpy>=0.0.56",
+    "urdf-usd-converter>=0.2.0",
+    "mujoco-usd-converter>=0.3.0",
+]
+
+[project.scripts]
+fusion2urdf = "fusion2urdf.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

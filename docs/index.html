@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fusion2urdf — Fusion 360 to URDF / ROS 2 / MJCF / OpenUSD</title>
+<meta name="description" content="Export Fusion 360 designs to URDF, ROS 2 description packages, MJCF and OpenUSD (Isaac Sim / Newton ready).">
+<style>
+:root{
+  --bg:#0d0f12; --surface:#14171c; --surface2:#1a1e25; --border:#262c36;
+  --ink:#e8eaed; --muted:#9aa3ad; --faint:#6b7480;
+  --accent:#ff6a00; --accent-ink:#ffb380;
+  --mono:ui-monospace,'SF Mono','Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline}
+code,pre,.mono{font-family:var(--mono)}
+.wrap{max-width:960px;margin:0 auto;padding:0 24px}
+
+nav{position:sticky;top:0;z-index:10;background:rgba(13,15,18,.88);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+nav .wrap{display:flex;align-items:center;gap:24px;height:56px}
+nav .brand{font-family:var(--mono);font-weight:600;color:var(--ink);font-size:15px}
+nav .brand span{color:var(--accent)}
+nav .links{margin-left:auto;display:flex;gap:20px;font-size:14px}
+nav .links a{color:var(--muted)}
+nav .links a:hover{color:var(--ink);text-decoration:none}
+nav .links a.cta{color:var(--accent-ink);border:1px solid var(--border);padding:5px 12px;border-radius:6px}
+nav .links a.cta:hover{border-color:var(--accent)}
+
+header{padding:88px 0 56px;border-bottom:1px solid var(--border)}
+h1{font-family:var(--mono);font-size:clamp(26px,4.5vw,40px);font-weight:600;letter-spacing:-.02em;line-height:1.2}
+h1 .arrow{color:var(--accent)}
+.sub{margin-top:16px;font-size:17px;color:var(--muted);max-width:640px}
+.sub b{color:var(--ink);font-weight:600}
+.hero-actions{margin-top:28px;display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-block;font-family:var(--mono);font-size:14px;padding:10px 18px;border-radius:6px;border:1px solid var(--border);color:var(--ink);min-height:44px;line-height:24px}
+.btn:hover{text-decoration:none;border-color:var(--faint)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#140a00;font-weight:600}
+.btn.primary:hover{background:#ff7d1f}
+
+.pipeline{margin-top:44px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 24px;overflow-x:auto}
+.pipeline pre{font-size:13px;line-height:1.7;color:var(--muted);white-space:pre}
+.pipeline .k{color:var(--ink)} .pipeline .a{color:var(--accent)} .pipeline .c{color:var(--faint)}
+
+section{padding:56px 0;border-bottom:1px solid var(--border)}
+h2{font-family:var(--mono);font-size:20px;font-weight:600;margin-bottom:8px}
+h2::before{content:"## ";color:var(--accent)}
+.lead{color:var(--muted);margin-bottom:24px;max-width:640px}
+
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-family:var(--mono);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);padding:10px 14px;border-bottom:1px solid var(--border)}
+td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+td:first-child{font-family:var(--mono);color:var(--accent-ink);white-space:nowrap}
+td .dim{color:var(--muted)}
+
+.steps{counter-reset:step;display:grid;gap:0}
+.step{display:grid;grid-template-columns:44px 1fr;gap:16px;padding:20px 0;border-bottom:1px solid var(--border)}
+.step:last-child{border-bottom:none}
+.step .n{counter-increment:step;font-family:var(--mono);color:var(--accent);font-size:14px;padding-top:2px}
+.step .n::before{content:"0" counter(step)}
+.step h3{font-size:15px;font-weight:600;margin-bottom:6px}
+.step p{font-size:14px;color:var(--muted)}
+pre.code{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.65;overflow-x:auto;margin-top:10px;color:var(--ink)}
+pre.code .c{color:var(--faint)}
+pre.code .p{color:var(--accent-ink)}
+
+.viewer-card{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:28px}
+.viewer-card h3{font-family:var(--mono);font-size:16px;margin-bottom:6px}
+.viewer-card p{font-size:14px;color:var(--muted)}
+@media(max-width:640px){.viewer-card{grid-template-columns:1fr}}
+
+footer{padding:40px 0;font-size:13px;color:var(--faint)}
+footer .wrap{display:flex;gap:20px;flex-wrap:wrap}
+footer a{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <div class="brand">fusion2urdf<span>_</span></div>
+  <div class="links">
+    <a href="#targets">Targets</a>
+    <a href="#quickstart">Quick start</a>
+    <a href="viewer.html">Viewer</a>
+    <a class="cta" href="https://github.com/johnnynunez/fusion2urdf">GitHub</a>
+  </div>
+</div></nav>
+
+<header><div class="wrap">
+  <h1>Fusion 360 <span class="arrow">&rarr;</span> URDF &middot; ROS&nbsp;2 &middot; MJCF &middot; OpenUSD</h1>
+  <p class="sub">One export from Fusion 360, every robotics format you need:
+  plain <b>URDF</b> for Isaac Sim, a colcon-buildable <b>ROS 2 Jazzy</b> package,
+  <b>MJCF</b> for MuJoCo, and layered <b>OpenUSD</b> assets via the
+  newton-physics converters — including the Newton-ready flavor with
+  <code>mjc:*</code> physics attributes.</p>
+  <div class="hero-actions">
+    <a class="btn primary" href="https://github.com/johnnynunez/fusion2urdf">Get the exporter</a>
+    <a class="btn" href="viewer.html">Open URDF viewer</a>
+  </div>
+  <div class="pipeline"><pre>
+<span class="k">Fusion 360 add-in</span>                          <span class="c"># runs inside Fusion's Python</span>
+      <span class="a">&darr;</span>  joints &middot; inertials &middot; materials &middot; STL meshes
+<span class="k">robot.json + meshes/</span>                       <span class="c"># portable export bundle</span>
+      <span class="a">&darr;</span>  fusion2urdf build
+<span class="a">&#9500;&#9472;</span> out/urdf/        robot.urdf + isaac_sim_import.py
+<span class="a">&#9500;&#9472;</span> out/ros2/        &lt;robot&gt;_description  <span class="c"># rviz2 &middot; gz-sim &middot; ros2_control</span>
+<span class="a">&#9500;&#9472;</span> out/mjcf/        robot.xml            <span class="c"># compiles in MuJoCo</span>
+<span class="a">&#9500;&#9472;</span> out/usd/         robot.usda           <span class="c"># UsdPhysics</span>
+<span class="a">&#9492;&#9472;</span> out/usd_newton/  robot.usda           <span class="c"># Newton / mjc:* attributes</span></pre></div>
+</div></header>
+
+<section id="targets"><div class="wrap">
+  <h2>Targets</h2>
+  <p class="lead">Every target is generated from the same intermediate model and
+  verified in the test suite against the real consumers — no hand-waving.</p>
+  <table>
+    <tr><th>Target</th><th>Output</th><th>Verified with</th></tr>
+    <tr><td>urdf</td><td>Self-contained URDF, relative mesh paths, Isaac Sim import script<span class="dim"> — loads without a ROS workspace</span></td><td>yourdfpy parse + forward kinematics</td></tr>
+    <tr><td>ros2</td><td>Complete <code>&lt;robot&gt;_description</code> package: xacro, ros2_control, RViz2 + Gazebo Sim launch files, ros_gz_bridge config</td><td>xacro expansion, ament layout</td></tr>
+    <tr><td>mjcf</td><td>MuJoCo XML with correct body tree, fullinertia and joint ranges</td><td>mujoco.MjModel compile + FK</td></tr>
+    <tr><td>usd</td><td>Layered USD with UsdPhysics rigid bodies, masses and joints (Z-up, meters)</td><td>urdf-usd-converter, pxr stage checks</td></tr>
+    <tr><td>usd-newton</td><td>USD carrying MuJoCo/Newton <code>mjc:*</code> schema attributes on top of UsdPhysics</td><td>mujoco-usd-converter, pxr stage checks</td></tr>
+  </table>
+  <p class="lead" style="margin-top:20px;margin-bottom:0">Both USD flavors ship with an
+  <a href="https://docs.isaacsim.omniverse.nvidia.com/latest/robot_setup/asset_transformer.html">Asset Transformer</a>
+  rule profile + runner that restructures them into the official Isaac Sim asset layout
+  (payloads, physics variants, Isaac robot schema) — validated end to end inside Isaac Sim 6.</p>
+</div></section>
+
+<section id="quickstart"><div class="wrap">
+  <h2>Quick start</h2>
+  <div class="steps">
+    <div class="step"><div class="n"></div><div>
+      <h3>Install the Fusion 360 script</h3>
+      <p>Clone the repo and copy the add-in into Fusion's scripts folder.</p>
+      <pre class="code"><span class="c"># Windows (PowerShell)</span>
+git clone https://github.com/johnnynunez/fusion2urdf
+Copy-Item ".\addin\URDF_Exporter_Plus\" -Destination "${env:APPDATA}\Autodesk\Autodesk Fusion 360\API\Scripts\" -Recurse
+
+<span class="c"># macOS</span>
+cp -r ./addin/URDF_Exporter_Plus "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Scripts/"</pre>
+    </div></div>
+    <div class="step"><div class="n"></div><div>
+      <h3>Export from Fusion 360</h3>
+      <p>Name one component <code>base_link</code>, use Rigid / Revolute / Slider joints
+      with limits, then run <b>URDF_Exporter_Plus</b> from UTILITIES &rarr; ADD-INS.
+      It writes <code>&lt;robot&gt;_export/</code> with the bundle, the URDF and the ROS 2 package.</p>
+    </div></div>
+    <div class="step"><div class="n"></div><div>
+      <h3>Build the remaining targets</h3>
+      <p>USD conversion needs pip packages, so it runs on the desktop.</p>
+      <pre class="code">pip install "fusion2urdf[usd] @ git+https://github.com/johnnynunez/fusion2urdf"
+fusion2urdf build myrobot_export/ <span class="p">--targets urdf,ros2,mjcf,usd,usd-newton</span></pre>
+    </div></div>
+    <div class="step"><div class="n"></div><div>
+      <h3>Load it anywhere</h3>
+      <pre class="code"><span class="c"># Isaac Sim — USD opens directly, or full PhysX import:</span>
+$ISAAC_SIM_DIR/python.sh out/urdf/isaac_sim_import.py
+<span class="c"># Official Isaac Sim asset layout (Isaac Sim &ge; 6.0):</span>
+$ISAAC_SIM_DIR/python.sh out/usd/run_asset_transformer.py
+<span class="c"># ROS 2:</span>
+ros2 launch myrobot_description display.launch.py</pre>
+    </div></div>
+  </div>
+</div></section>
+
+<section id="viewer-link"><div class="wrap">
+  <div class="viewer-card">
+    <div>
+      <h3>Check your export in the browser</h3>
+      <p>Drag your exported <code>out/urdf/</code> folder into the web viewer:
+      inspect the kinematic tree, move every joint with sliders, and catch
+      wrong axes or origins before touching a simulator. Nothing is uploaded —
+      it all runs locally in your browser.</p>
+    </div>
+    <a class="btn primary" href="viewer.html">Open viewer</a>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <span>MIT License</span>
+  <a href="https://github.com/johnnynunez/fusion2urdf">Source</a>
+  <a href="https://github.com/newton-physics/urdf-usd-converter">urdf-usd-converter</a>
+  <a href="https://github.com/newton-physics/mujoco-usd-converter">mujoco-usd-converter</a>
+  <span>Builds on syuntoku14 &middot; SpaceMaster85 &middot; runtimerobotics</span>
+</div></footer>
+
+</body>
+</html>

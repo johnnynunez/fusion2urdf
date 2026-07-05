@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>URDF Viewer — fusion2urdf</title>
+<meta name="description" content="Inspect fusion2urdf exports in the browser: load a URDF + STL meshes, move joints, verify axes and origins. Fully client-side.">
+<style>
+:root{
+  --bg:#0d0f12; --surface:#14171c; --surface2:#1a1e25; --border:#262c36;
+  --ink:#e8eaed; --muted:#9aa3ad; --faint:#6b7480;
+  --accent:#ff6a00; --accent-ink:#ffb380; --danger:#ff5c5c;
+  --mono:ui-monospace,'SF Mono','Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+a{color:var(--accent-ink);text-decoration:none}
+
+nav{background:var(--bg);border-bottom:1px solid var(--border);flex:none}
+nav .bar{display:flex;align-items:center;gap:16px;height:52px;padding:0 16px}
+nav .brand{font-family:var(--mono);font-weight:600;font-size:14px;color:var(--ink)}
+nav .brand span{color:var(--accent)}
+nav .crumb{font-family:var(--mono);font-size:13px;color:var(--faint)}
+nav .right{margin-left:auto;display:flex;gap:14px;font-size:13px}
+nav .right a{color:var(--muted)}
+
+main{flex:1;display:grid;grid-template-columns:300px 1fr;min-height:0}
+@media(max-width:760px){main{grid-template-columns:1fr}aside{position:absolute;z-index:5;height:100%;box-shadow:8px 0 24px rgba(0,0,0,.5)}}
+
+aside{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+aside .panel{padding:14px 16px;border-bottom:1px solid var(--border)}
+aside h2{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin-bottom:10px}
+
+.drop{border:1.5px dashed var(--border);border-radius:8px;padding:14px;text-align:center;font-size:13px;color:var(--muted);cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--accent);background:rgba(255,106,0,.06)}
+.drop .mono{font-size:12px;color:var(--faint);display:block;margin-top:4px}
+.drop input{display:none}
+
+.robot-meta{font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.8}
+.robot-meta b{color:var(--ink)}
+.robot-meta .err{color:var(--danger)}
+
+#joints{flex:1;overflow-y:auto;padding:6px 16px 16px}
+.joint{padding:10px 0;border-bottom:1px solid var(--surface2)}
+.joint:last-child{border-bottom:none}
+.joint .head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.joint .name{font-family:var(--mono);font-size:12px;color:var(--ink)}
+.joint .val{font-family:var(--mono);font-size:11px;color:var(--accent-ink);min-width:64px;text-align:right}
+.joint .lim{font-family:var(--mono);font-size:10px;color:var(--faint);display:flex;justify-content:space-between;margin-top:2px}
+input[type=range]{width:100%;height:24px;-webkit-appearance:none;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:3px;background:var(--border);border-radius:2px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);margin-top:-5.5px}
+input[type=range]::-moz-range-track{height:3px;background:var(--border);border-radius:2px}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border:none;border-radius:50%;background:var(--accent)}
+
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{font-family:var(--mono);font-size:12px;padding:7px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--ink);cursor:pointer;min-height:32px}
+.btn:hover{border-color:var(--faint)}
+.btn.on{border-color:var(--accent);color:var(--accent-ink)}
+
+#stage{position:relative;min-height:0}
+#stage canvas{display:block;outline:none}
+#hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+#hint .box{font-family:var(--mono);font-size:13px;color:var(--faint);text-align:center;line-height:2}
+#toast{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 16px;font-family:var(--mono);font-size:12px;color:var(--muted);opacity:0;transition:opacity .25s;pointer-events:none;max-width:80%}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<nav><div class="bar">
+  <a class="brand" href="index.html">fusion2urdf<span>_</span></a>
+  <span class="crumb">/ viewer</span>
+  <div class="right">
+    <a href="index.html">Docs</a>
+    <a href="https://github.com/johnnynunez/fusion2urdf">GitHub</a>
+  </div>
+</div></nav>
+
+<main>
+  <aside>
+    <div class="panel">
+      <h2>Load robot</h2>
+      <label class="drop" id="drop">
+        Drop your <b>out/urdf/</b> folder here<br>
+        <span class="mono">(.urdf + meshes/*.stl) — or click to browse</span>
+        <input type="file" id="fileInput" multiple webkitdirectory>
+      </label>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn" id="loadDemo">Load demo robot</button>
+        <button class="btn" id="resetJoints">Reset joints</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Robot</h2>
+      <div class="robot-meta" id="meta">No robot loaded.</div>
+    </div>
+    <div class="panel" style="border-bottom:none;padding-bottom:8px"><h2>Joints</h2></div>
+    <div id="joints"></div>
+  </aside>
+
+  <div id="stage">
+    <div id="hint"><div class="box">
+      drag &amp; drop a URDF export bundle<br>
+      or press <b style="color:var(--accent-ink)">Load demo robot</b><br><br>
+      orbit: drag &nbsp;&middot;&nbsp; pan: right-drag &nbsp;&middot;&nbsp; zoom: wheel
+    </div></div>
+    <div id="toast"></div>
+  </div>
+</main>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/",
+    "urdf-loader": "https://cdn.jsdelivr.net/npm/urdf-loader@0.12.6/src/URDFLoader.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import URDFLoader from 'urdf-loader';
+
+// ---------- scene ----------
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0f12);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.001, 100);
+camera.position.set(0.55, 0.35, 0.55);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.15, 0);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
+key.position.set(2, 3, 2);
+scene.add(key);
+
+const grid = new THREE.GridHelper(2, 20, 0x333a45, 0x22272f);
+scene.add(grid);
+scene.add(new THREE.AxesHelper(0.15));
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+// ---------- URDF loading ----------
+const metaEl = document.getElementById('meta');
+const jointsEl = document.getElementById('joints');
+const hintEl = document.getElementById('hint');
+const toastEl = document.getElementById('toast');
+let robot = null;
+let toastTimer = null;
+
+function toast(msg, isError = false) {
+  toastEl.textContent = msg;
+  toastEl.style.color = isError ? 'var(--danger)' : 'var(--muted)';
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 4000);
+}
+
+const DEFAULT_MAT = () => new THREE.MeshStandardMaterial({
+  color: 0x8a9099, metalness: 0.1, roughness: 0.65,
+});
+
+function makeLoader(resolveMesh) {
+  const loader = new URDFLoader();
+  const stl = new STLLoader();
+  loader.loadMeshCb = (path, manager, done) => {
+    const url = resolveMesh(path);
+    if (!url) { done(null, new Error(`mesh not found: ${path}`)); toast(`mesh not found: ${path}`, true); return; }
+    stl.load(url, g => {
+      g.computeVertexNormals();
+      done(new THREE.Mesh(g, DEFAULT_MAT()));
+    }, undefined, err => { done(null, err); toast(`failed to load ${path}`, true); });
+  };
+  return loader;
+}
+
+function setRobot(newRobot, sourceName) {
+  if (robot) scene.remove(robot);
+  robot = newRobot;
+  robot.rotation.x = -Math.PI / 2;   // URDF is Z-up, three.js is Y-up
+  scene.add(robot);
+  hintEl.style.display = 'none';
+
+  // frame the camera on the robot
+  const box = new THREE.Box3().setFromObject(robot);
+  const size = box.getSize(new THREE.Vector3()).length() || 0.5;
+  const center = box.getCenter(new THREE.Vector3());
+  controls.target.copy(center);
+  camera.position.copy(center).add(new THREE.Vector3(size, size * 0.7, size));
+  camera.near = size / 100; camera.far = size * 20;
+  camera.updateProjectionMatrix();
+
+  buildJointUI();
+  const movable = Object.values(robot.joints).filter(j => j.jointType !== 'fixed');
+  metaEl.innerHTML =
+    `name&nbsp;&nbsp;&nbsp;<b>${robot.robotName || '(unnamed)'}</b><br>` +
+    `source&nbsp;<b>${sourceName}</b><br>` +
+    `links&nbsp;&nbsp;<b>${Object.keys(robot.links).length}</b> &middot; ` +
+    `joints <b>${Object.keys(robot.joints).length}</b> ` +
+    `(<b>${movable.length}</b> movable)`;
+  toast(`loaded ${robot.robotName || sourceName}`);
+}
+
+function fmt(v) { return (v >= 0 ? '+' : '') + v.toFixed(3); }
+
+function buildJointUI() {
+  jointsEl.innerHTML = '';
+  const names = Object.keys(robot.joints);
+  let any = false;
+  for (const name of names) {
+    const joint = robot.joints[name];
+    if (joint.jointType === 'fixed') continue;
+    any = true;
+    const isContinuous = joint.jointType === 'continuous';
+    const lo = isContinuous ? -Math.PI : +joint.limit.lower;
+    const hi = isContinuous ? +Math.PI : +joint.limit.upper;
+    const unit = joint.jointType === 'prismatic' ? 'm' : 'rad';
+
+    const row = document.createElement('div');
+    row.className = 'joint';
+    row.innerHTML =
+      `<div class="head"><span class="name">${name}</span>` +
+      `<span class="val" data-val>${fmt(0)} ${unit}</span></div>` +
+      `<input type="range" min="${lo}" max="${hi}" step="${(hi - lo) / 400 || 0.01}" value="0">` +
+      `<div class="lim"><span>${fmt(lo)}</span><span>${joint.jointType}</span><span>${fmt(hi)}</span></div>`;
+    const slider = row.querySelector('input');
+    const valEl = row.querySelector('[data-val]');
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      robot.setJointValue(name, v);
+      valEl.textContent = `${fmt(v)} ${unit}`;
+    });
+    jointsEl.appendChild(row);
+  }
+  if (!any) jointsEl.innerHTML = '<div class="robot-meta" style="padding:8px 0">No movable joints.</div>';
+}
+
+document.getElementById('resetJoints').addEventListener('click', () => {
+  if (!robot) return;
+  for (const name of Object.keys(robot.joints)) robot.setJointValue(name, 0);
+  jointsEl.querySelectorAll('.joint').forEach(row => {
+    row.querySelector('input').value = 0;
+    const unit = row.querySelector('.lim span:nth-child(2)').textContent === 'prismatic' ? 'm' : 'rad';
+    row.querySelector('[data-val]').textContent = `${fmt(0)} ${unit}`;
+  });
+});
+
+// ---------- demo robot (fetched from ./demo) ----------
+function loadDemo() {
+  try {
+    // URDFLoader already joins mesh paths with the URDF's directory,
+    // so resolve against the page URL, not the demo/ folder.
+    const loader = makeLoader(path => new URL(path, location.href).href);
+    loader.load('demo/twodof.urdf', r => setRobot(r, 'demo/twodof.urdf'),
+      undefined, err => toast(`demo failed: ${err.message || err}`, true));
+  } catch (e) { toast(`demo failed: ${e.message}`, true); }
+}
+document.getElementById('loadDemo').addEventListener('click', loadDemo);
+if (new URLSearchParams(location.search).has('demo')) loadDemo();
+
+// ---------- drag & drop / file picker ----------
+async function walkEntry(entry, out) {
+  if (entry.isFile) {
+    await new Promise((res, rej) => entry.file(f => { out.push(f); res(); }, rej));
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    let batch;
+    do {
+      batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      for (const e of batch) await walkEntry(e, out);
+    } while (batch.length);
+  }
+}
+
+async function filesFromDrop(dt) {
+  const out = [];
+  const entries = [...dt.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (entries.length) { for (const e of entries) await walkEntry(e, out); }
+  else out.push(...dt.files);
+  return out;
+}
+
+function loadFromFiles(files) {
+  const urdfFile = files.find(f => f.name.toLowerCase().endsWith('.urdf'))
+    || files.find(f => f.name.toLowerCase().endsWith('.xacro'));
+  if (!urdfFile) { toast('no .urdf file in the drop — export with the Fusion add-in first', true); return; }
+
+  const byName = new Map(files.map(f => [f.name.toLowerCase(), f]));
+  const resolveMesh = path => {
+    const base = path.split(/[\\/]/).pop().toLowerCase();
+    const f = byName.get(base);
+    return f ? URL.createObjectURL(f) : null;
+  };
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const loader = makeLoader(resolveMesh);
+      const r = loader.parse(reader.result);
+      setRobot(r, urdfFile.name);
+    } catch (e) { toast(`parse error: ${e.message}`, true); }
+  };
+  reader.readAsText(urdfFile);
+}
+
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('fileInput');
+fileInput.addEventListener('change', () => loadFromFiles([...fileInput.files]));
+for (const el of [drop, stage]) {
+  el.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  el.addEventListener('dragleave', () => drop.classList.remove('over'));
+  el.addEventListener('drop', async e => {
+    e.preventDefault(); drop.classList.remove('over');
+    loadFromFiles(await filesFromDrop(e.dataTransfer));
+  });
+}
+</script>
+</body>
+</html>

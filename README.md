@@ -1,2 +1,2 @@
 # fusion2urdf
-fusion2urd
+fusion2urdf

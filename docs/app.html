@@ -60,6 +60,12 @@ h2{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacin
 .status.error .dot{background:var(--danger)}
 @keyframes pulse{50%{opacity:.3}}
 
+.joint-row{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;padding:8px 0;border-bottom:1px solid var(--surface2);font-family:var(--mono);font-size:11px}
+.joint-row select,.joint-row input{background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--ink);font-family:var(--mono);font-size:11px;padding:4px 6px;min-height:28px;width:100%}
+.joint-row .full{grid-column:1/-1;display:flex;gap:6px;align-items:center}
+.joint-row .full label{color:var(--faint);white-space:nowrap}
+.joint-row .rm{background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;padding:0 6px}
+
 #console{background:var(--bg);font-family:var(--mono);font-size:12.5px;line-height:1.75;padding:18px 22px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
 #console .cmd{color:var(--accent-ink)}
 #console .ok{color:var(--ok)}
@@ -82,14 +88,28 @@ h2{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacin
 <main>
   <aside>
     <div class="panel">
-      <h2>1 &middot; Export bundle</h2>
+      <h2>1 &middot; Input</h2>
       <label class="drop" id="drop">
-        Drop your <b>&lt;robot&gt;_export/</b> folder here<br>
-        <span class="mono">(robot.json + meshes/*.stl) — or click to browse</span>
+        Drop a <b>&lt;robot&gt;_export/</b> bundle or a <b>.step</b> file<br>
+        <span class="mono">bundle: robot.json + meshes/ &middot; STEP: no Fusion app needed</span>
         <input type="file" id="fileInput" multiple webkitdirectory>
       </label>
-      <div class="meta" id="bundleMeta" style="margin-top:10px">No bundle loaded.
-<button class="btn" id="loadDemo" style="margin-top:8px">Use demo bundle</button></div>
+      <div class="meta" id="bundleMeta" style="margin-top:10px">Nothing loaded.
+<button class="btn" id="loadDemo" style="margin-top:8px">Demo bundle</button>
+<button class="btn" id="loadDemoStep">Demo STEP assembly</button></div>
+    </div>
+
+    <div class="panel" id="stepPanel" style="display:none">
+      <h2>1b &middot; Assembly setup (STEP)</h2>
+      <div class="meta" style="margin-bottom:10px">
+        base link <select id="baseSelect" class="btn" style="min-height:32px;padding:4px 8px;width:auto"></select>
+        &nbsp; density <input id="density" class="btn" style="min-height:32px;padding:4px 8px;width:72px" type="number" value="1000" step="50"> kg/m&sup3;
+      </div>
+      <div id="jointRows"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn" id="addJoint" style="min-height:32px">+ joint</button>
+        <button class="btn" id="autoConnect" style="min-height:32px" title="Weld every unconnected part to the base with fixed joints">auto-connect</button>
+      </div>
     </div>
 
     <div class="panel">
@@ -136,9 +156,10 @@ function loadScript(url) {
 }
 
 const MODULES = ['__init__','model','math3d','intermediate','urdf_writer',
-                 'mjcf_writer','ros2_package','usd_export','cli'];
+                 'mjcf_writer','ros2_package','usd_export','cli','mesh_inertia'];
 const els = Object.fromEntries(['drop','fileInput','bundleMeta','build','download',
-  'status','statusText','loadDemo'].map(id => [id, document.getElementById(id)]));
+  'status','statusText','loadDemo','loadDemoStep','stepPanel','baseSelect',
+  'density','jointRows','addJoint','autoConnect'].map(id => [id, document.getElementById(id)]));
 const consoleEl = document.getElementById('console');
 
 let pyodide = null;
@@ -158,7 +179,7 @@ function setStatus(text, cls) {
   els.statusText.textContent = text;
 }
 function refreshButtons() {
-  els.build.disabled = !(pyodide && bundle);
+  els.build.disabled = !(pyodide && (bundle || step));
   els.download.disabled = !zipBytes;
 }
 
@@ -225,8 +246,14 @@ function normalize(files) {
 }
 
 async function setBundle(files, label) {
+  const stepKey = [...files.keys()].find(k => /\.ste?p$/i.test(k));
+  if (stepKey && ![...files.keys()].some(k => k.endsWith('robot.json'))) {
+    return setStepInput(files.get(stepKey), stepKey.split('/').pop(), label);
+  }
   const norm = normalize(files);
-  if (!norm) { log('no robot.json found in the drop — export with the Fusion add-in first', 'err'); return; }
+  if (!norm) { log('no robot.json or .step file in the drop', 'err'); return; }
+  step = null;
+  els.stepPanel.style.display = 'none';
   const meshCount = [...norm.keys()].filter(k => k.startsWith('meshes/')).length;
   const jsonText = typeof norm.get('robot.json') === 'string'
     ? norm.get('robot.json') : await norm.get('robot.json').text();
@@ -274,6 +301,146 @@ async function loadDemoBundle() {
   await setBundle(files, 'demo bundle');
 }
 
+// ---------- STEP intake (no Fusion app needed) ----------
+// occt-import-js = OpenCascade compiled to WASM: reads STEP, returns one
+// tessellated mesh per assembly part. We then build robot.json in-browser;
+// inertials come from mesh geometry + density (fusion2urdf mesh_inertia).
+const OCCT_URL = 'https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/occt-import-js.js';
+let occt = null;
+let step = null;   // {parts:[{name, stlName, triCount}], stls:Map, joints:[...]}
+
+async function ensureOcct() {
+  if (occt) return occt;
+  setStatus('loading STEP engine (OpenCascade WASM)…', 'busy');
+  await loadScript(OCCT_URL);
+  occt = await occtimportjs({
+    locateFile: f => 'https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/' + f,
+  });
+  return occt;
+}
+
+function meshToStl(mesh) {
+  // binary STL from occt mesh {positions:[...], indices:[...]} (mm units)
+  const pos = mesh.attributes.position.array;
+  const idx = mesh.index.array;
+  const n = idx.length / 3;
+  const buf = new ArrayBuffer(84 + 50 * n);
+  new DataView(buf).setUint32(80, n, true);
+  const dv = new DataView(buf);
+  for (let t = 0; t < n; t++) {
+    let off = 84 + 50 * t + 12;           // skip normal (readers recompute)
+    for (let v = 0; v < 3; v++) {
+      const i = idx[3 * t + v] * 3;
+      dv.setFloat32(off, pos[i], true);
+      dv.setFloat32(off + 4, pos[i + 1], true);
+      dv.setFloat32(off + 8, pos[i + 2], true);
+      off += 12;
+    }
+  }
+  return new Uint8Array(buf);
+}
+
+async function setStepInput(file, fileName, label) {
+  try {
+    await ensureOcct();
+    setStatus('tessellating STEP…', 'busy');
+    const data = file instanceof Uint8Array ? file : new Uint8Array(await file.arrayBuffer());
+    const res = occt.ReadStepFile(data, null);
+    if (!res.success || !res.meshes.length) { log('STEP read failed', 'err'); setStatus('STEP failed', 'error'); return; }
+
+    const stls = new Map();
+    const parts = res.meshes.map((m, i) => {
+      const raw = (m.name || `part${i + 1}`).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || `part${i + 1}`;
+      let name = raw, k = 2;
+      while ([...stls.keys()].includes(name + '.stl')) name = `${raw}_${k++}`;
+      stls.set(name + '.stl', meshToStl(m));
+      return { name, stlName: name + '.stl', triCount: m.index.array.length / 3 };
+    });
+
+    robotName = fileName.replace(/\.ste?p$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'robot';
+    step = { parts, stls, joints: [] };
+    bundle = null; zipBytes = null;
+    els.drop.classList.add('loaded');
+    els.stepPanel.style.display = '';
+    els.baseSelect.innerHTML = parts.map(p => `<option>${p.name}</option>`).join('');
+    els.jointRows.innerHTML = '';
+    els.bundleMeta.innerHTML =
+      `robot&nbsp;&nbsp;<b>${robotName}</b><br>` +
+      `parts&nbsp;&nbsp;<b>${parts.length}</b> (${parts.map(p => p.name).join(', ').slice(0, 120)})<br>` +
+      `source <b>${label}</b> &middot; inertials from geometry + density`;
+    log(`STEP loaded: ${parts.length} parts — pick the base link, add joints (or auto-connect), then Build`, 'ok');
+    setStatus('STEP ready — configure joints', 'ready');
+    refreshButtons();
+  } catch (e) {
+    log('STEP error: ' + e.message, 'err');
+    setStatus('STEP failed', 'error');
+  }
+}
+
+function jointRow(j) {
+  const row = document.createElement('div');
+  row.className = 'joint-row';
+  const opts = sel => step.parts.map(p => `<option${p.name === sel ? ' selected' : ''}>${p.name}</option>`).join('');
+  row.innerHTML =
+    `<select data-k="parent">${opts(j.parent)}</select>` +
+    `<select data-k="child">${opts(j.child)}</select>` +
+    `<button class="rm" title="remove">&times;</button>` +
+    `<div class="full"><label>type</label>` +
+    `<select data-k="type"><option${j.type === 'fixed' ? ' selected' : ''}>fixed</option><option${j.type === 'revolute' ? ' selected' : ''}>revolute</option><option${j.type === 'prismatic' ? ' selected' : ''}>prismatic</option></select>` +
+    `<label>axis</label><select data-k="axis"><option>z</option><option>x</option><option>y</option></select>` +
+    `<label>origin m</label><input data-k="xyz" value="${j.xyz || '0 0 0'}" placeholder="x y z"></div>`;
+  row.querySelector('.rm').onclick = () => { step.joints.splice(step.joints.indexOf(j), 1); row.remove(); };
+  for (const el of row.querySelectorAll('[data-k]')) {
+    el.onchange = () => { j[el.dataset.k] = el.value; };
+    j[el.dataset.k] = el.value;
+  }
+  return row;
+}
+
+els.addJoint.onclick = () => {
+  if (!step) return;
+  const j = { parent: step.parts[0].name, child: (step.parts[1] || step.parts[0]).name, type: 'revolute', axis: 'z', xyz: '0 0 0' };
+  step.joints.push(j);
+  els.jointRows.appendChild(jointRow(j));
+};
+els.autoConnect.onclick = () => {
+  if (!step) return;
+  const base = els.baseSelect.value;
+  const connected = new Set([base, ...step.joints.map(j => j.child)]);
+  for (const p of step.parts) {
+    if (connected.has(p.name)) continue;
+    const j = { parent: base, child: p.name, type: 'fixed', axis: 'z', xyz: '0 0 0' };
+    step.joints.push(j);
+    els.jointRows.appendChild(jointRow(j));
+  }
+  log(`auto-connect: ${step.joints.length} joints total`, 'dim');
+};
+
+function stepToBundle() {
+  const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+  const density = parseFloat(els.density.value) || 1000;
+  const robot = {
+    schema: 1, name: robotName, base_link: els.baseSelect.value,
+    links: step.parts.map(p => ({
+      name: p.name, world_xyz: [0, 0, 0], inertial: null,
+      mesh: p.stlName, mesh_scale: [0.001, 0.001, 0.001],
+      material: 'default', density,
+    })),
+    joints: step.joints.map((j, i) => ({
+      name: `joint${i + 1}`, type: j.type, parent: j.parent, child: j.child,
+      world_xyz: (j.xyz || '0 0 0').trim().split(/\s+/).map(Number),
+      axis: AXES[j.axis] || AXES.z,
+      lower: j.type === 'fixed' ? 0 : -3.141592653589793,
+      upper: j.type === 'fixed' ? 0 : 3.141592653589793,
+      effort: 100, velocity: 100,
+    })),
+    materials: { default: { name: 'default', rgba: [0.65, 0.67, 0.7, 1] } },
+  };
+  const files = new Map([['robot.json', JSON.stringify(robot, null, 2)]]);
+  for (const [n, bytes] of step.stls) files.set('meshes/' + n, bytes);
+  return { files, name: 'STEP import' };
+}
+
 // ---------- build ----------
 async function runBuild() {
   const targets = [...document.querySelectorAll('.targets input:checked:not(:disabled)')]
@@ -283,13 +450,19 @@ async function runBuild() {
   setStatus('building…', 'busy');
   els.build.disabled = true;
   try {
+    const src = step ? stepToBundle() : bundle;
+    if (step && !step.joints.length) {
+      log('no joints defined — use auto-connect or + joint first', 'err');
+      setStatus('configure joints', 'error');
+      return;
+    }
     // stage bundle into the pyodide FS
     pyodide.runPython(`
 import shutil, os
 shutil.rmtree('/bundle', ignore_errors=True)
 os.makedirs('/bundle/meshes', exist_ok=True)
 `);
-    for (const [rel, v] of bundle.files) {
+    for (const [rel, v] of src.files) {
       const data = typeof v === 'string' ? v
         : v instanceof Uint8Array ? v : new Uint8Array(await v.arrayBuffer());
       const path = '/bundle/' + rel;
@@ -356,12 +529,25 @@ els.download.addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
-// ---------- headless selftest (?selftest) ----------
+// ---------- demo STEP + headless selftest ----------
+els.loadDemoStep.addEventListener('click', loadDemoStep);
+async function loadDemoStep() {
+  const r = await fetch('demo/as1.step');
+  if (!r.ok) { log(`demo STEP fetch failed -> ${r.status}`, 'err'); return; }
+  await setStepInput(new Uint8Array(await r.arrayBuffer()), 'as1.step', 'demo STEP');
+}
+
 async function selftest() {
-  log('--- selftest: demo bundle -> urdf,ros2,mjcf ---', 'cmd');
+  log('--- selftest 1/2: demo bundle -> urdf,ros2,mjcf ---', 'cmd');
   await loadDemoBundle();
   await runBuild();
+  log('--- selftest 2/2: demo STEP -> auto-connect -> build ---', 'cmd');
+  await loadDemoStep();
+  if (!step) { document.title = 'FAIL step — fusion2urdf'; return; }
+  els.autoConnect.onclick();
+  await runBuild();
 }
+
 </script>
 </body>
 </html>

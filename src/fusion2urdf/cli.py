@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 from .intermediate import load_robot_json
+from .mesh_inertia import ensure_inertials
 from .mjcf_writer import build_mjcf
 from .ros2_package import generate_ros2_package
 from .urdf_writer import build_urdf
@@ -46,6 +47,9 @@ def cmd_build(args: argparse.Namespace) -> int:
     robot_json = _find_robot_json(export_dir)
     meshes_dir = robot_json.parent / "meshes"
     robot = load_robot_json(robot_json)
+    computed = ensure_inertials(robot, meshes_dir)
+    if computed:
+        print(f"computed inertials from mesh geometry: {', '.join(computed)}")
     robot.validate()
 
     targets = [t.strip() for t in args.targets.split(",") if t.strip()]

@@ -78,6 +78,9 @@ class Link:
     # Scale applied to the mesh (Fusion STL exports are in mm -> 0.001).
     mesh_scale: List[float] = field(default_factory=lambda: [0.001, 0.001, 0.001])
     material: Optional[str] = None
+    # Optional uniform density [kg/m^3]; used to derive the inertial from the
+    # mesh when the source format carries no physics data (see mesh_inertia).
+    density: Optional[float] = None
 
     @property
     def visual_origin(self) -> Origin:
@@ -92,6 +95,7 @@ class Link:
             "mesh": self.mesh,
             "mesh_scale": list(self.mesh_scale),
             "material": self.material,
+            "density": self.density,
         }
 
     @classmethod
@@ -103,6 +107,7 @@ class Link:
             mesh=d.get("mesh"),
             mesh_scale=list(d.get("mesh_scale", [0.001, 0.001, 0.001])),
             material=d.get("material"),
+            density=d.get("density"),
         )
 
 

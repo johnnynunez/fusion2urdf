@@ -85,6 +85,7 @@ footer a{color:var(--muted)}
   <div class="links">
     <a href="#targets">Targets</a>
     <a href="#quickstart">Quick start</a>
+    <a href="app.html">Web app</a>
     <a href="viewer.html">Viewer</a>
     <a class="cta" href="https://github.com/johnnynunez/fusion2urdf">GitHub</a>
   </div>
@@ -98,8 +99,9 @@ footer a{color:var(--muted)}
   newton-physics converters — including the Newton-ready flavor with
   <code>mjc:*</code> physics attributes.</p>
   <div class="hero-actions">
-    <a class="btn primary" href="https://github.com/johnnynunez/fusion2urdf">Get the exporter</a>
+    <a class="btn primary" href="app.html">Convert in your browser</a>
     <a class="btn" href="viewer.html">Open URDF viewer</a>
+    <a class="btn" href="https://github.com/johnnynunez/fusion2urdf">Get the exporter</a>
   </div>
   <div class="pipeline"><pre>
 <span class="k">Fusion 360 add-in</span>                          <span class="c"># runs inside Fusion's Python</span>
@@ -171,13 +173,14 @@ ros2 launch myrobot_description display.launch.py</pre>
 <section id="viewer-link"><div class="wrap">
   <div class="viewer-card">
     <div>
-      <h3>Check your export in the browser</h3>
-      <p>Drag your exported <code>out/urdf/</code> folder into the web viewer:
-      inspect the kinematic tree, move every joint with sliders, and catch
-      wrong axes or origins before touching a simulator. Nothing is uploaded —
-      it all runs locally in your browser.</p>
+      <h3>Use it without installing anything</h3>
+      <p>The <a href="app.html">web app</a> runs the real fusion2urdf Python
+      package in your browser (Pyodide/WASM): drop your Fusion export bundle,
+      pick targets, download the generated URDF + ROS 2 package + MJCF as a zip.
+      Then check the result in the <a href="viewer.html">URDF viewer</a> —
+      kinematic tree, joint sliders, axes. Nothing is uploaded anywhere.</p>
     </div>
-    <a class="btn primary" href="viewer.html">Open viewer</a>
+    <a class="btn primary" href="app.html">Open web app</a>
   </div>
 </div></section>
 

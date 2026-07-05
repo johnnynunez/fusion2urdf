@@ -1,0 +1,162 @@
+{
+  "schema": 1,
+  "name": "twodof",
+  "base_link": "base_link",
+  "links": [
+    {
+      "name": "base_link",
+      "world_xyz": [
+        0,
+        0,
+        0
+      ],
+      "inertial": {
+        "mass": 1.0,
+        "center_of_mass": [
+          0,
+          0,
+          0.05
+        ],
+        "inertia": [
+          0.001666666666666667,
+          0.001666666666666667,
+          0.001666666666666667,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "mesh": "base_link.stl",
+      "mesh_scale": [
+        0.001,
+        0.001,
+        0.001
+      ],
+      "material": "grey"
+    },
+    {
+      "name": "link1",
+      "world_xyz": [
+        0,
+        0,
+        0.1
+      ],
+      "inertial": {
+        "mass": 0.5,
+        "center_of_mass": [
+          0,
+          0,
+          0.2
+        ],
+        "inertia": [
+          0.0017333333333333335,
+          0.0017333333333333335,
+          0.00013333333333333334,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "mesh": "link1.stl",
+      "mesh_scale": [
+        0.001,
+        0.001,
+        0.001
+      ],
+      "material": "orange"
+    },
+    {
+      "name": "link2",
+      "world_xyz": [
+        0,
+        0,
+        0.3
+      ],
+      "inertial": {
+        "mass": 0.25,
+        "center_of_mass": [
+          0,
+          0,
+          0.375
+        ],
+        "inertia": [
+          0.0004875,
+          0.0004875,
+          3.75e-05,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "mesh": "link2.stl",
+      "mesh_scale": [
+        0.001,
+        0.001,
+        0.001
+      ],
+      "material": "orange"
+    }
+  ],
+  "joints": [
+    {
+      "name": "joint1",
+      "type": "revolute",
+      "parent": "base_link",
+      "child": "link1",
+      "world_xyz": [
+        0,
+        0,
+        0.1
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "lower": -3.141592653589793,
+      "upper": 3.141592653589793,
+      "effort": 100.0,
+      "velocity": 100.0
+    },
+    {
+      "name": "joint2",
+      "type": "revolute",
+      "parent": "link1",
+      "child": "link2",
+      "world_xyz": [
+        0,
+        0,
+        0.3
+      ],
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "lower": -1.5707963267948966,
+      "upper": 1.5707963267948966,
+      "effort": 100.0,
+      "velocity": 100.0
+    }
+  ],
+  "materials": {
+    "grey": {
+      "name": "grey",
+      "rgba": [
+        0.5,
+        0.5,
+        0.5,
+        1
+      ]
+    },
+    "orange": {
+      "name": "orange",
+      "rgba": [
+        1,
+        0.42,
+        0.04,
+        1
+      ]
+    }
+  }
+}

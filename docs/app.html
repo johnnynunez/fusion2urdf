@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web App — fusion2urdf</title>
+<meta name="description" content="Run the fusion2urdf pipeline in your browser: convert a Fusion 360 export bundle to URDF, a ROS 2 package and MJCF — fully client-side via Pyodide.">
+<style>
+:root{
+  --bg:#0d0f12; --surface:#14171c; --surface2:#1a1e25; --border:#262c36;
+  --ink:#e8eaed; --muted:#9aa3ad; --faint:#6b7480;
+  --accent:#ff6a00; --accent-ink:#ffb380; --ok:#4ade80; --danger:#ff5c5c;
+  --mono:ui-monospace,'SF Mono','Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+a{color:var(--accent-ink);text-decoration:none}
+
+nav{background:var(--bg);border-bottom:1px solid var(--border);flex:none}
+nav .bar{display:flex;align-items:center;gap:16px;height:52px;padding:0 16px}
+nav .brand{font-family:var(--mono);font-weight:600;font-size:14px;color:var(--ink)}
+nav .brand span{color:var(--accent)}
+nav .crumb{font-family:var(--mono);font-size:13px;color:var(--faint)}
+nav .right{margin-left:auto;display:flex;gap:14px;font-size:13px}
+nav .right a{color:var(--muted)}
+
+main{flex:1;display:grid;grid-template-columns:340px 1fr;min-height:0}
+@media(max-width:800px){main{grid-template-columns:1fr;overflow-y:auto}#console{min-height:300px}}
+
+aside{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;overflow-y:auto}
+.panel{padding:14px 16px;border-bottom:1px solid var(--border)}
+h2{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin-bottom:10px}
+
+.drop{border:1.5px dashed var(--border);border-radius:8px;padding:14px;text-align:center;font-size:13px;color:var(--muted);cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--accent);background:rgba(255,106,0,.06)}
+.drop .mono{font-family:var(--mono);font-size:12px;color:var(--faint);display:block;margin-top:4px}
+.drop input{display:none}
+.drop.loaded{border-style:solid;border-color:var(--ok);color:var(--ink)}
+
+.meta{font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.8}
+.meta b{color:var(--ink)}
+
+.targets label{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:14px;cursor:pointer;min-height:32px}
+.targets label.off{color:var(--faint);cursor:not-allowed}
+.targets input{accent-color:var(--accent);width:16px;height:16px}
+.targets .tag{font-family:var(--mono);font-size:10px;color:var(--faint);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:auto}
+
+.btn{font-family:var(--mono);font-size:13px;padding:10px 16px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--ink);cursor:pointer;min-height:44px;width:100%}
+.btn:hover:not(:disabled){border-color:var(--faint)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#140a00;font-weight:600}
+.btn.primary:hover:not(:disabled){background:#ff7d1f}
+.btn+.btn{margin-top:8px}
+
+.status{font-family:var(--mono);font-size:12px;padding:8px 12px;border-radius:6px;background:var(--surface2);color:var(--muted);display:flex;align-items:center;gap:8px}
+.status .dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.status.ready .dot{background:var(--ok)}
+.status.busy .dot{background:var(--accent);animation:pulse 1s infinite}
+.status.error .dot{background:var(--danger)}
+@keyframes pulse{50%{opacity:.3}}
+
+#console{background:var(--bg);font-family:var(--mono);font-size:12.5px;line-height:1.75;padding:18px 22px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+#console .cmd{color:var(--accent-ink)}
+#console .ok{color:var(--ok)}
+#console .err{color:var(--danger)}
+#console .dim{color:var(--faint)}
+</style>
+</head>
+<body>
+
+<nav><div class="bar">
+  <a class="brand" href="index.html">fusion2urdf<span>_</span></a>
+  <span class="crumb">/ app</span>
+  <div class="right">
+    <a href="index.html">Docs</a>
+    <a href="viewer.html">Viewer</a>
+    <a href="https://github.com/johnnynunez/fusion2urdf">GitHub</a>
+  </div>
+</div></nav>
+
+<main>
+  <aside>
+    <div class="panel">
+      <h2>1 &middot; Export bundle</h2>
+      <label class="drop" id="drop">
+        Drop your <b>&lt;robot&gt;_export/</b> folder here<br>
+        <span class="mono">(robot.json + meshes/*.stl) — or click to browse</span>
+        <input type="file" id="fileInput" multiple webkitdirectory>
+      </label>
+      <div class="meta" id="bundleMeta" style="margin-top:10px">No bundle loaded.
+<button class="btn" id="loadDemo" style="margin-top:8px">Use demo bundle</button></div>
+    </div>
+
+    <div class="panel">
+      <h2>2 &middot; Targets</h2>
+      <div class="targets">
+        <label><input type="checkbox" value="urdf" checked> urdf <span class="tag">Isaac Sim</span></label>
+        <label><input type="checkbox" value="ros2" checked> ros2 <span class="tag">Jazzy pkg</span></label>
+        <label><input type="checkbox" value="mjcf" checked> mjcf <span class="tag">MuJoCo</span></label>
+        <label class="off" title="Native C++ converters — run on desktop: pip install fusion2urdf[usd]">
+          <input type="checkbox" disabled> usd / usd-newton <span class="tag">desktop only</span></label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>3 &middot; Build</h2>
+      <button class="btn primary" id="build" disabled>Build</button>
+      <button class="btn" id="download" disabled>Download outputs (.zip)</button>
+    </div>
+
+    <div class="panel" style="border-bottom:none">
+      <div class="status" id="status"><span class="dot"></span><span id="statusText">loading python runtime&hellip;</span></div>
+    </div>
+  </aside>
+
+  <div id="console">fusion2urdf web app <span class="dim">— the real Python package running in your browser (Pyodide/WASM). Nothing is uploaded anywhere.</span>
+
+<span class="dim">USD targets need the native newton-physics converters — on your desktop:
+  pip install "fusion2urdf[usd] @ git+https://github.com/johnnynunez/fusion2urdf"
+  fusion2urdf build &lt;bundle&gt; --targets usd,usd-newton</span>
+</div>
+</main>
+
+<script>
+const PYODIDE_URL = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js';
+
+function loadScript(url) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = res;
+    s.onerror = () => rej(new Error('failed to load ' + url));
+    document.head.appendChild(s);
+  });
+}
+
+const MODULES = ['__init__','model','math3d','intermediate','urdf_writer',
+                 'mjcf_writer','ros2_package','usd_export','cli'];
+const els = Object.fromEntries(['drop','fileInput','bundleMeta','build','download',
+  'status','statusText','loadDemo'].map(id => [id, document.getElementById(id)]));
+const consoleEl = document.getElementById('console');
+
+let pyodide = null;
+let bundle = null;       // {files: Map<relpath, Uint8Array|string>, name}
+let zipBytes = null;
+let robotName = 'robot';
+
+function log(msg, cls) {
+  const span = document.createElement('span');
+  if (cls) span.className = cls;
+  span.textContent = msg + '\n';
+  consoleEl.appendChild(span);
+  consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+function setStatus(text, cls) {
+  els.status.className = 'status ' + (cls || '');
+  els.statusText.textContent = text;
+}
+function refreshButtons() {
+  els.build.disabled = !(pyodide && bundle);
+  els.download.disabled = !zipBytes;
+}
+
+// ---------- boot pyodide + install the real package ----------
+(async () => {
+  try {
+    for (let attempt = 1; ; attempt++) {
+      try { await loadScript(PYODIDE_URL); break; }
+      catch (e) {
+        if (attempt >= 3) throw e;
+        log(`pyodide.js load failed (attempt ${attempt}) — retrying…`, 'dim');
+        await new Promise(r => setTimeout(r, 1500 * attempt));
+      }
+    }
+    pyodide = await loadPyodide();
+    setStatus('fetching fusion2urdf package…', 'busy');
+    pyodide.FS.mkdirTree('/lib/fusion2urdf');
+    for (const m of MODULES) {
+      const r = await fetch(`pkg/fusion2urdf/${m}.py`);
+      if (!r.ok) throw new Error(`fetch pkg/${m}.py -> ${r.status}`);
+      pyodide.FS.writeFile(`/lib/fusion2urdf/${m}.py`, await r.text());
+    }
+    pyodide.runPython(`
+import sys
+sys.path.insert(0, '/lib')
+import fusion2urdf
+print('fusion2urdf', fusion2urdf.__version__, 'loaded in', sys.platform)
+`);
+    setStatus('ready', 'ready');
+    log('runtime ready — fusion2urdf package imported', 'ok');
+    refreshButtons();
+    if (new URLSearchParams(location.search).has('selftest')) selftest();
+  } catch (e) {
+    setStatus('runtime failed', 'error');
+    log('runtime error: ' + e.message, 'err');
+  }
+})();
+
+// ---------- bundle intake ----------
+async function walkEntry(entry, prefix, out) {
+  if (entry.isFile) {
+    const f = await new Promise((res, rej) => entry.file(res, rej));
+    out.set(prefix + f.name, f);
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    let batch;
+    do {
+      batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      for (const e of batch) await walkEntry(e, prefix + entry.name + '/', out);
+    } while (batch.length);
+  }
+}
+
+function normalize(files) {
+  // strip any leading folders so robot.json sits at the bundle root
+  let jsonKey = [...files.keys()].find(k => k.endsWith('robot.json'));
+  if (!jsonKey) return null;
+  const root = jsonKey.slice(0, -'robot.json'.length);
+  const out = new Map();
+  for (const [k, v] of files) {
+    if (k.startsWith(root)) out.set(k.slice(root.length), v);
+  }
+  return out;
+}
+
+async function setBundle(files, label) {
+  const norm = normalize(files);
+  if (!norm) { log('no robot.json found in the drop — export with the Fusion add-in first', 'err'); return; }
+  const meshCount = [...norm.keys()].filter(k => k.startsWith('meshes/')).length;
+  const jsonText = typeof norm.get('robot.json') === 'string'
+    ? norm.get('robot.json') : await norm.get('robot.json').text();
+  let info;
+  try { info = JSON.parse(jsonText); }
+  catch (e) { log('robot.json is not valid JSON: ' + e.message, 'err'); return; }
+  robotName = info.name || 'robot';
+  bundle = { files: norm, name: label };
+  zipBytes = null;
+  els.drop.classList.add('loaded');
+  els.bundleMeta.innerHTML =
+    `robot&nbsp;&nbsp;<b>${robotName}</b><br>` +
+    `links&nbsp;&nbsp;<b>${(info.links || []).length}</b> &middot; joints <b>${(info.joints || []).length}</b> &middot; meshes <b>${meshCount}</b><br>` +
+    `source <b>${label}</b>`;
+  log(`bundle loaded: ${robotName} (${(info.links || []).length} links, ${(info.joints || []).length} joints, ${meshCount} meshes)`);
+  refreshButtons();
+}
+
+els.fileInput.addEventListener('change', () => {
+  const files = new Map([...els.fileInput.files].map(f => [f.webkitRelativePath || f.name, f]));
+  setBundle(files, 'local folder');
+});
+for (const ev of ['dragover', 'dragleave', 'drop']) {
+  els.drop.addEventListener(ev, async e => {
+    e.preventDefault();
+    els.drop.classList.toggle('over', ev === 'dragover');
+    if (ev !== 'drop') return;
+    const out = new Map();
+    const entries = [...e.dataTransfer.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    if (entries.length) { for (const en of entries) await walkEntry(en, '', out); }
+    else for (const f of e.dataTransfer.files) out.set(f.name, f);
+    setBundle(out, 'drag & drop');
+  });
+}
+
+els.loadDemo.addEventListener('click', loadDemoBundle);
+async function loadDemoBundle() {
+  const files = new Map();
+  const paths = ['robot.json', 'meshes/base_link.stl', 'meshes/link1.stl', 'meshes/link2.stl'];
+  for (const p of paths) {
+    const r = await fetch('demo/' + p);
+    if (!r.ok) { log(`demo fetch failed: ${p} -> ${r.status}`, 'err'); return; }
+    files.set(p, p.endsWith('.json') ? await r.text() : new Uint8Array(await r.arrayBuffer()));
+  }
+  await setBundle(files, 'demo bundle');
+}
+
+// ---------- build ----------
+async function runBuild() {
+  const targets = [...document.querySelectorAll('.targets input:checked:not(:disabled)')]
+    .map(c => c.value).join(',');
+  if (!targets) { log('select at least one target', 'err'); return; }
+
+  setStatus('building…', 'busy');
+  els.build.disabled = true;
+  try {
+    // stage bundle into the pyodide FS
+    pyodide.runPython(`
+import shutil, os
+shutil.rmtree('/bundle', ignore_errors=True)
+os.makedirs('/bundle/meshes', exist_ok=True)
+`);
+    for (const [rel, v] of bundle.files) {
+      const data = typeof v === 'string' ? v
+        : v instanceof Uint8Array ? v : new Uint8Array(await v.arrayBuffer());
+      const path = '/bundle/' + rel;
+      pyodide.FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
+      pyodide.FS.writeFile(path, data);
+    }
+    pyodide.setStdout({ batched: s => log('  ' + s) });
+    pyodide.setStderr({ batched: s => log('  ' + s, 'dim') });
+    log(`$ fusion2urdf build bundle/ --targets ${targets}`, 'cmd');
+
+    const result = pyodide.runPython(`
+import io, json, os, zipfile
+from fusion2urdf.cli import main as cli_main
+from fusion2urdf.intermediate import load_robot_json
+
+rc = cli_main(['build', '/bundle', '--targets', '${targets}'])
+
+robot = load_robot_json('/bundle/robot.json')
+paths = []
+buf = io.BytesIO()
+with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+    for root, _, files in os.walk('/bundle/out'):
+        for f in sorted(files):
+            p = os.path.join(root, f)
+            rel = os.path.relpath(p, '/bundle')
+            z.write(p, rel)
+            paths.append(rel + '  (' + str(os.path.getsize(p)) + ' B)')
+json.dumps({'rc': rc, 'name': robot.name, 'files': paths, 'nbytes': buf.getbuffer().nbytes})
+`);
+    const res = JSON.parse(result);
+    zipBytes = pyodide.runPython(`
+import io, os, zipfile
+buf = io.BytesIO()
+with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+    for root, _, files in os.walk('/bundle/out'):
+        for f in sorted(files):
+            p = os.path.join(root, f)
+            z.write(p, os.path.relpath(p, '/bundle'))
+buf.getvalue()
+`).toJs();
+    log(`\n${res.files.length} files generated:`, 'ok');
+    for (const p of res.files) log('  ' + p, 'dim');
+    log(`\nzip ready (${(zipBytes.length / 1024).toFixed(1)} KB) — press Download`, 'ok');
+    setStatus('build OK — ' + res.files.length + ' files', 'ready');
+    document.title = `OK ${res.files.length} — fusion2urdf`;
+  } catch (e) {
+    log('build failed: ' + e.message, 'err');
+    setStatus('build failed', 'error');
+    document.title = 'FAIL — fusion2urdf';
+  } finally {
+    els.build.disabled = false;
+    refreshButtons();
+  }
+}
+els.build.addEventListener('click', runBuild);
+
+els.download.addEventListener('click', () => {
+  if (!zipBytes) return;
+  const blob = new Blob([zipBytes], { type: 'application/zip' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${robotName}_out.zip`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+// ---------- headless selftest (?selftest) ----------
+async function selftest() {
+  log('--- selftest: demo bundle -> urdf,ros2,mjcf ---', 'cmd');
+  await loadDemoBundle();
+  await runBuild();
+}
+</script>
+</body>
+</html>

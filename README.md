@@ -106,7 +106,36 @@ fusion2urdf build myrobot_export/ --no-fix-base --robot-type Wheeled
 # inspect / validate a bundle
 fusion2urdf info myrobot_export/
 fusion2urdf validate myrobot_export/
+fusion2urdf validate myrobot_export/ --strict   # exit 1 on plausibility warnings
 ```
+
+## Sim-ready validation
+
+Robot descriptions that "look fine" routinely produce wrong dynamics after
+conversion, because downstream consumers re-derive anything that is missing
+or non-physical from collision geometry — in an implementation-defined way
+that differs between engines (see the discussion in
+[mujoco-usd-converter#100](https://github.com/newton-physics/mujoco-usd-converter/issues/100)).
+fusion2urdf validates at export time, where the fix is cheap:
+
+* **Model checks** (`validate`, and automatically during `build`):
+  * missing link inertials (consumers fall back to geometry-derived mass)
+  * zero mass (`UsdPhysics` treats an authored `0` as *"compute from
+    geometry"*, not "massless"; simulators reject massless dynamic bodies)
+  * negative / non-finite mass and negative-definite inertia tensors (hard
+    errors — no consumer can do anything sensible with them)
+  * triangle-inequality violations on the **principal moments** (frame
+    independent, computed via eigendecomposition — a rotated tensor whose raw
+    diagonal looks plausible is still caught); MuJoCo only accepts such
+    tensors via `balanceinertia`, other engines silently clamp
+  * implausible total mass (usually a mm/m or g/kg unit slip)
+* **USD output checks** (after `usd` / `usd-newton` conversion):
+  * stage metrics: `metersPerUnit == 1`, `kilogramsPerUnit == 1`, Z-up
+  * every rigid body authors the full `UsdPhysicsMassAPI` set —
+    `physics:mass`, `physics:centerOfMass`, `physics:diagonalInertia` —
+    so no engine has to guess (unauthored components are re-derived from
+    collision geometry and diverge from the Fusion-computed values)
+  * total authored mass matches the Fusion model within 1%
 
 ## Using the outputs
 

@@ -309,6 +309,84 @@ def convert_mjcf_to_usd(
     return Path(str(asset.path if hasattr(asset, "path") else asset))
 
 
+def validate_usd_physics(usd_path: str | Path, robot=None) -> list[str]:
+    """Post-conversion sanity checks on an emitted USD asset.
+
+    Verifies the properties downstream physics runtimes rely on and that a
+    converter can silently drop (any unauthored ``UsdPhysicsMassAPI``
+    component is re-derived from collision geometry, in an
+    implementation-defined way):
+
+    * stage metrics: ``metersPerUnit == 1``, ``kilogramsPerUnit == 1``, Z-up
+    * every rigid body authors ``physics:mass``, ``physics:centerOfMass``
+      and ``physics:diagonalInertia`` (density-only bodies are flagged)
+    * total authored mass matches the source model within 1% (when ``robot``
+      is given)
+
+    Returns human-readable warnings; empty list means the asset passed.
+    Needs ``pxr`` (usd-core, pulled in by the ``[usd]`` extra); returns a
+    single note when unavailable.
+    """
+    try:
+        from pxr import Usd, UsdGeom, UsdPhysics
+    except ImportError:
+        return ["pxr (usd-core) not installed; USD physics validation skipped"]
+
+    try:
+        stage = Usd.Stage.Open(str(usd_path))
+    except Exception:  # pxr raises Tf.ErrorException on unresolvable paths
+        stage = None
+    if stage is None:
+        return [f"cannot open {usd_path}; USD physics validation skipped"]
+
+    warnings: list[str] = []
+    meters = UsdGeom.GetStageMetersPerUnit(stage)
+    if abs(meters - 1.0) > 1e-9:
+        warnings.append(f"metersPerUnit is {meters}, expected 1.0 (SI)")
+    kilograms = UsdPhysics.GetStageKilogramsPerUnit(stage)
+    if abs(kilograms - 1.0) > 1e-9:
+        warnings.append(
+            f"kilogramsPerUnit is {kilograms}, expected 1.0 — authored masses "
+            "are not SI kilograms"
+        )
+    if UsdGeom.GetStageUpAxis(stage) != UsdGeom.Tokens.z:
+        warnings.append("stage up axis is not Z (Isaac Sim robot convention)")
+
+    def authored(prim, attr_name):
+        attr = prim.GetAttribute(attr_name)
+        return attr and attr.HasAuthoredValue() and attr.Get() is not None
+
+    total = 0.0
+    missing = {"physics:mass": [], "physics:centerOfMass": [], "physics:diagonalInertia": []}
+    for prim in stage.Traverse():
+        if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        if authored(prim, "physics:mass"):
+            total += float(prim.GetAttribute("physics:mass").Get())
+        for attr_name, paths in missing.items():
+            if not authored(prim, attr_name):
+                paths.append(str(prim.GetPath()))
+    for attr_name, paths in missing.items():
+        if paths:
+            shown = ", ".join(paths[:3]) + (" ..." if len(paths) > 3 else "")
+            warnings.append(
+                f"{len(paths)} rigid bodies do not author `{attr_name}` "
+                f"(consumers re-derive it from geometry): {shown}"
+            )
+
+    if robot is not None:
+        source_total = sum(l.inertial.mass for l in robot.links if l.inertial)
+        if source_total > 0 and total > 0:
+            relative_error = abs(total - source_total) / source_total
+            if relative_error > 0.01:
+                warnings.append(
+                    f"total authored mass {total:.6g} kg deviates "
+                    f"{relative_error * 100:.2f}% from the source model "
+                    f"({source_total:.6g} kg)"
+                )
+    return warnings
+
+
 def write_isaac_import_script(
     robot_name: str,
     output_dir: str | Path,

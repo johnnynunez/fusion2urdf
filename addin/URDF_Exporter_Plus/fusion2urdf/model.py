@@ -12,8 +12,11 @@ the desktop CLI. All values use SI units and URDF conventions:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+from .math3d import symmetric_eigenvalues
 
 JOINT_TYPES = ("fixed", "revolute", "continuous", "prismatic", "floating", "planar")
 
@@ -52,6 +55,14 @@ class Inertial:
             center_of_mass=list(d["center_of_mass"]),
             inertia=list(d["inertia"]),
         )
+
+    def principal_moments(self) -> List[float]:
+        """Principal moments of inertia (eigenvalues, ascending).
+
+        Frame-independent: use these, not the raw diagonal, to judge whether
+        the tensor is physically possible.
+        """
+        return symmetric_eigenvalues(self.inertia)
 
 
 @dataclass
@@ -195,6 +206,64 @@ class Robot:
             raise ValueError(
                 f"links not connected by any joint: {sorted(orphans)}"
             )
+
+    def validate_inertials(self) -> List[str]:
+        """Static plausibility checks on link inertials (sim-ready gate).
+
+        Downstream consumers (MuJoCo, PhysX, and especially USD runtimes,
+        where any unauthored mass property is re-derived from collision
+        geometry in an implementation-defined way) silently diverge from the
+        source when inertials are missing or non-physical. Catching that at
+        export time is much cheaper than debugging wrong dynamics later.
+
+        Returns a list of human-readable warnings. Physically impossible
+        data (negative or non-finite mass, negative-definite inertia) raises
+        ``ValueError`` instead, because no downstream consumer can do
+        anything sensible with it.
+        """
+        warnings: List[str] = []
+        total_mass = 0.0
+        for link in self.links:
+            inertial = link.inertial
+            if inertial is None:
+                warnings.append(
+                    f"link '{link.name}': no inertial; downstream consumers will "
+                    "derive mass properties from geometry (implementation-defined, "
+                    "diverges between engines)"
+                )
+                continue
+            if not math.isfinite(inertial.mass) or inertial.mass < 0.0:
+                raise ValueError(
+                    f"link {link.name!r}: negative or non-finite mass {inertial.mass!r}"
+                )
+            if inertial.mass == 0.0:
+                warnings.append(
+                    f"link '{link.name}': zero mass; UsdPhysics treats 0 as 'compute "
+                    "from geometry' and simulators reject massless dynamic bodies"
+                )
+                continue
+            total_mass += inertial.mass
+            moments = inertial.principal_moments()
+            noise_floor = 1e-9 * max(abs(m) for m in moments) if any(moments) else 0.0
+            if any(m < -noise_floor for m in moments):
+                raise ValueError(
+                    f"link {link.name!r}: inertia tensor has negative principal "
+                    f"moments {moments} (not a physical inertia)"
+                )
+            m1, m2, m3 = (max(m, 0.0) for m in moments)
+            tolerance = 1e-6 * max(m1 + m2 + m3, 1e-12)
+            if m1 + m2 < m3 - tolerance:
+                warnings.append(
+                    f"link '{link.name}': inertia violates the triangle inequality "
+                    f"(principal moments {[round(m, 9) for m in moments]}); MuJoCo "
+                    "only accepts it via balanceinertia and other engines clamp it"
+                )
+        if total_mass and not 1e-3 <= total_mass <= 1e4:
+            warnings.append(
+                f"total mass {total_mass:.6g} kg looks implausible; check unit "
+                "conversions (Fusion physical properties are kg but STL exports are mm)"
+            )
+        return warnings
 
     def to_dict(self) -> dict:
         return {

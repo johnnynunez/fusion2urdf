@@ -26,6 +26,7 @@ from .urdf_writer import build_urdf
 from .usd_export import (
     convert_mjcf_to_usd,
     convert_urdf_to_usd,
+    validate_usd_physics,
     write_asset_transformer_files,
     write_isaac_import_script,
 )
@@ -51,6 +52,8 @@ def cmd_build(args: argparse.Namespace) -> int:
     if computed:
         print(f"computed inertials from mesh geometry: {', '.join(computed)}")
     robot.validate()
+    for warning in robot.validate_inertials():
+        print(f"warning: {warning}", file=sys.stderr)
 
     targets = [t.strip() for t in args.targets.split(",") if t.strip()]
     unknown = set(targets) - set(ALL_TARGETS)
@@ -101,6 +104,8 @@ def cmd_build(args: argparse.Namespace) -> int:
             usd_file = convert_urdf_to_usd(urdf_file, usd_dir)
             write_asset_transformer_files(robot.name, usd_dir)
             produced.append(str(usd_file))
+            for warning in validate_usd_physics(usd_file, robot):
+                print(f"warning: usd: {warning}", file=sys.stderr)
         except ImportError as exc:
             print(f"warning: USD target skipped: {exc}", file=sys.stderr)
 
@@ -110,6 +115,8 @@ def cmd_build(args: argparse.Namespace) -> int:
             usd_file = convert_mjcf_to_usd(mjcf_file, usd_dir)
             write_asset_transformer_files(robot.name, usd_dir)
             produced.append(str(usd_file))
+            for warning in validate_usd_physics(usd_file, robot):
+                print(f"warning: usd-newton: {warning}", file=sys.stderr)
         except ImportError as exc:
             print(f"warning: usd-newton target skipped: {exc}", file=sys.stderr)
 
@@ -136,7 +143,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
     robot_json = _find_robot_json(Path(args.export_dir))
     robot = load_robot_json(robot_json)
     robot.validate()
+    warnings = robot.validate_inertials()
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     print(f"OK: {robot.name} ({len(robot.links)} links, {len(robot.joints)} joints)")
+    if warnings and args.strict:
+        return 1
     return 0
 
 
@@ -194,6 +206,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_val = sub.add_parser("validate", help="validate a robot.json")
     p_val.add_argument("export_dir")
+    p_val.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit non-zero when inertial plausibility warnings are found",
+    )
     p_val.set_defaults(func=cmd_validate)
 
     p_info = sub.add_parser("info", help="print robot summary as JSON")

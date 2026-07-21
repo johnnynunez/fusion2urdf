@@ -114,5 +114,34 @@ def inertia_about_com(
     return [i - mass * t for i, t in zip(inertia_world, translation)]
 
 
+def symmetric_eigenvalues(inertia: Sequence[float]) -> Vec3:
+    """Eigenvalues of a symmetric 3x3 tensor [ixx, iyy, izz, ixy, iyz, ixz].
+
+    Closed-form trigonometric solution (no numpy). Returns the principal
+    moments sorted ascending. Used to check inertia plausibility: physical
+    principal moments are positive and satisfy the triangle inequality
+    regardless of the frame the tensor was expressed in.
+    """
+    ixx, iyy, izz, ixy, iyz, ixz = (float(v) for v in inertia)
+    p1 = ixy * ixy + iyz * iyz + ixz * ixz
+    if p1 < 1e-30:
+        return sorted([ixx, iyy, izz])
+    q = (ixx + iyy + izz) / 3.0
+    p2 = (ixx - q) ** 2 + (iyy - q) ** 2 + (izz - q) ** 2 + 2.0 * p1
+    p = math.sqrt(p2 / 6.0)
+    b11, b22, b33 = (ixx - q) / p, (iyy - q) / p, (izz - q) / p
+    b12, b23, b13 = ixy / p, iyz / p, ixz / p
+    det_b = (
+        b11 * (b22 * b33 - b23 * b23)
+        - b12 * (b12 * b33 - b23 * b13)
+        + b13 * (b12 * b23 - b22 * b13)
+    )
+    r = max(-1.0, min(1.0, det_b / 2.0))
+    phi = math.acos(r) / 3.0
+    e1 = q + 2.0 * p * math.cos(phi)
+    e3 = q + 2.0 * p * math.cos(phi + 2.0 * math.pi / 3.0)
+    return sorted([e1, 3.0 * q - e1 - e3, e3])
+
+
 def round_list(values: Sequence[float], ndigits: int = 6) -> Vec3:
     return [round(v, ndigits) for v in values]
